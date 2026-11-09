@@ -89,6 +89,52 @@ describe.skipIf(!enabled)("DockerWorkspaceRuntime integration", () => {
       await runtime.destroy(workspace);
     }
   }, 120_000);
+  it("samples memory, OOM kills and disk from the workspace's own cgroup without waking it", async () => {
+    const runtime = new DockerWorkspaceRuntime(new Docker());
+    const workspace = await runtime.create({
+      id: `ws_${randomBytes(12).toString("hex")}`,
+      image: process.env.FACILITY_WORKSPACE_TEST_IMAGE ?? "facility-runner:serialized",
+      resources: { cpu: 1, memoryMb: 1_024 },
+    });
+    const sample = () =>
+      runtime.diagnostics(workspace, "/workspace/repos/app", AbortSignal.timeout(8_000));
+    try {
+      const repository = await runtime.exec(workspace, {
+        command: "sh",
+        args: [
+          "-lc",
+          "git init -q /workspace/repos/app && git -C /workspace/repos/app -c user.email=test@example.com -c user.name=test commit -q --allow-empty -m init",
+        ],
+      });
+      expect(repository.exitCode).toBe(0);
+      const before = await sample();
+      expect(before).toMatchObject({ provider: "docker", state: "running", probe: "ok" });
+      expect(before.health).toMatchObject({ memoryLimitBytes: 1_024 * 1024 * 1024, oomKills: 0 });
+      expect(before.health?.diskAvailableBytes).toBeGreaterThan(0);
+      expect(before.health?.gitHead).toMatch(/^[a-f0-9]{40}$/);
+
+      // Allocate past the workspace limit: the kernel kills the allocating process only.
+      const allocation = await runtime.exec(workspace, {
+        command: "node",
+        args: ["-e", "const held = []; for (;;) held.push(Buffer.alloc(64 * 1024 * 1024, 1));"],
+        timeoutMs: 60_000,
+      });
+      expect(allocation.exitCode).toBe(137);
+      const after = await sample();
+      expect(after).toMatchObject({ state: "running", probe: "ok", computeRef: before.computeRef });
+      expect(after.health?.oomKills).toBeGreaterThanOrEqual(1);
+
+      await runtime.suspend(workspace);
+      await expect(sample()).resolves.toEqual({
+        provider: "docker",
+        state: "sleeping",
+        computeRef: before.computeRef,
+      });
+      expect((await runtime.inspect(workspace)).state).toBe("sleeping");
+    } finally {
+      await runtime.destroy(workspace);
+    }
+  }, 120_000);
   it("renews Git and gh credentials in an existing runner without replacing its volume", async () => {
     const runtime = new DockerWorkspaceRuntime(new Docker());
     const workspace = await runtime.create({

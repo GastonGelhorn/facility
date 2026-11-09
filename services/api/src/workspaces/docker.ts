@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import { PassThrough, Readable } from "node:stream";
 import Docker from "dockerode";
 import {
+  parseWorkspaceHealth,
+  WORKSPACE_HEALTH_COMMAND,
+  type WorkspaceDiagnostics,
+} from "./diagnostics.js";
+import {
   inputFileArchive,
   readInputArchive,
   transferInputFile,
@@ -273,6 +278,45 @@ export class DockerWorkspaceRuntime implements WorkspaceRuntime {
       volumeRef: names.volume,
       endpoints: running ? await this.endpoints(container.Id, workspace.ports ?? []) : [],
     };
+  }
+
+  async diagnostics(
+    workspace: WorkspaceLocator,
+    cwd: string,
+    signal: AbortSignal,
+  ): Promise<WorkspaceDiagnostics> {
+    const names = this.assertLocator(workspace);
+    const container = await this.inspectContainer(workspace.expectedComputeRef ?? names.container);
+    if (!container) {
+      const state = (await this.volumeExists(names.volume)) ? "sleeping" : "destroyed";
+      return { provider: this.provider, state };
+    }
+    this.assertOwned(container, workspace.id, names.volume);
+    const result: WorkspaceDiagnostics = {
+      provider: this.provider,
+      state: container.State?.Running ? "running" : "sleeping",
+      computeRef: container.Id,
+    };
+    if (result.state !== "running") return result;
+    // Bind the probe to this container so sampling never wakes or replaces compute,
+    // and run it without the workspace environment: the probe needs no credentials.
+    const { environment: _environment, ...locator } = workspace;
+    try {
+      const command = await this.exec(
+        { ...locator, ports: [], expectedComputeRef: container.Id },
+        {
+          command: "node",
+          args: ["-e", WORKSPACE_HEALTH_COMMAND, cwd],
+          resume: false,
+          timeoutMs: 5_000,
+          signal,
+        },
+      );
+      if (command.exitCode !== 0) return { ...result, probe: "unavailable" };
+      return { ...result, probe: "ok", health: parseWorkspaceHealth(command.stdout) };
+    } catch {
+      return { ...result, probe: "unavailable" };
+    }
   }
 
   async suspend(workspace: WorkspaceLocator): Promise<void> {
