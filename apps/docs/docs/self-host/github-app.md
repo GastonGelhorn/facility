@@ -12,8 +12,8 @@ OIDC configuration separately; do not confuse its client secret with the GitHub 
 
 Create one GitHub App for the Facility instance and install it only on repositories the instance
 may automate. Grant read/write access to Contents, Issues, Pull requests, Workflows, Actions,
-Checks, and Deployments; grant read access to Metadata and organization membership. Add account
-email access if GitHub OAuth is also used for sign-in.
+Checks, and Deployments; grant read access to Commit statuses, Metadata, and organization
+membership. Add account email access if GitHub OAuth is also used for sign-in.
 
 Use the Facility web URL as the homepage and `<PUBLIC_URL>/webhooks/github` as the webhook URL. Keep
 webhook delivery active. Repository selection at installation time should include only repositories
@@ -32,10 +32,16 @@ The complete repository permission set is:
 | Issues | Read and write |
 | Pull requests | Read and write |
 | Workflows | Read and write |
+| Commit statuses | Read-only |
 | Code scanning alerts | Read-only |
 | Dependabot alerts | Read-only |
 | Secret scanning alerts | Read-only |
 | Metadata | Read-only |
+
+The delivery mirror reads each pull request head's combined commit status alongside its check
+runs. Without Commit statuses read access, GitHub answers `Resource not accessible by integration`
+and the project's GitHub sync fails. An App created from an earlier version of this table needs the
+permission added in its settings; GitHub then asks each installation owner to accept it.
 
 Organization membership read access may be required for organization-restricted identity and
 repository discovery. If browser sign-in needs private email discovery, configure the corresponding

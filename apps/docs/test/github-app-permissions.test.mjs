@@ -21,3 +21,9 @@ test("the GitHub App guide grants every platform security-sweep evidence permiss
   }
   assert.match(guide, /records a scanner as unavailable rather than clean/);
 });
+
+test("the GitHub App guide grants the Commit statuses read that the delivery mirror uses", () => {
+  const mirror = readFileSync(resolve(repoRoot, "services/api/src/github/mirror.ts"), "utf8");
+  assert.match(mirror, /"GET \/repos\/\{owner\}\/\{repo\}\/commits\/\{ref\}\/status"/);
+  assert.match(guide, /\| Commit statuses \| Read-only \|/);
+});
