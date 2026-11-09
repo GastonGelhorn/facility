@@ -145,7 +145,11 @@ Scale API and web horizontally behind a load balancer. Worker replicas can share
 validate provider quotas and rate limits before increasing concurrency. Retained workspace storage
 does not shrink when worker count falls.
 
-For Docker, reserve CPU, memory, inode, and disk headroom for nested project environments. For
+For Docker, reserve CPU, memory, inode, and disk headroom for nested project environments. New
+Docker workspaces store nested images with the `overlay2` driver, which shares image layers between
+nested containers. A workspace keeps `vfs`, which stores a full copy of every layer, when its
+retained volume already holds `vfs` data or when the host's volume filesystem cannot back
+`overlay2`. For
 Vercel, monitor sandbox concurrency, snapshot storage, token validity, and API quotas. A finite
 provider compute lease is normal; failure to snapshot or wake the retained state is not.
 

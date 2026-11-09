@@ -522,9 +522,14 @@ function workspaceBootstrapCommand(input: CreateWorkspace) {
     "rm -f /workspace/.facility/runtime-ready",
     "mkdir -p /workspace/.facility/home /workspace/.facility/claude /workspace/.facility/codex /workspace/.facility/docker",
     "chown -R node:node /workspace",
-    "rm -f /var/run/docker.sock",
-    "dockerd --host=unix:///var/run/docker.sock --data-root=/workspace/.facility/docker --storage-driver=vfs >/workspace/.facility/dockerd.log 2>&1 &",
-    "attempt=0; until docker info >/dev/null 2>&1; do attempt=$((attempt + 1)); test $attempt -lt 120; sleep 1; done",
+    // overlay2 shares image layers between nested containers; vfs copies every layer in full.
+    // Retained volumes keep the driver their images were stored with, and a host whose volume
+    // filesystem cannot back overlay2 falls back to vfs when that daemon exits.
+    'start_dockerd() { rm -f /var/run/docker.pid /var/run/docker.sock; dockerd --host=unix:///var/run/docker.sock --data-root=/workspace/.facility/docker --storage-driver="$1" >>/workspace/.facility/dockerd.log 2>&1 & dockerd_pid=$!; }',
+    ": >/workspace/.facility/dockerd.log",
+    "if [ -d /workspace/.facility/docker/vfs ]; then driver=vfs; else driver=overlay2; fi",
+    'start_dockerd "$driver"',
+    'attempt=0; until docker info >/dev/null 2>&1; do if [ "$driver" = overlay2 ] && ! kill -0 "$dockerd_pid" 2>/dev/null; then driver=vfs; start_dockerd vfs; fi; attempt=$((attempt + 1)); test $attempt -lt 120; sleep 1; done',
     "chown root:node /var/run/docker.sock",
     "chmod 0660 /var/run/docker.sock",
     ...gatewayPorts.map(({ port, gatewayPort }) => {
