@@ -89,6 +89,37 @@ describe.skipIf(!enabled)("DockerWorkspaceRuntime integration", () => {
       await runtime.destroy(workspace);
     }
   }, 120_000);
+  it("keeps vfs for a retained volume whose nested images were stored with it", async () => {
+    const docker = new Docker();
+    const image = process.env.FACILITY_WORKSPACE_TEST_IMAGE ?? "facility-runner:serialized";
+    const id = `ws_${randomBytes(12).toString("hex")}`;
+    const volume = `facility-ws-volume-${createHash("sha256").update(id).digest("hex").slice(0, 24)}`;
+    // A volume retained from before overlay2: its nested data root already holds vfs layers.
+    await docker.createVolume({
+      Name: volume,
+      Labels: { "facility.workspace.id": id, "facility.workload.kind": "workspace-v2" },
+    });
+    const seed = await docker.createContainer({
+      Image: image,
+      User: "root",
+      Entrypoint: ["mkdir", "-p", "/workspace/.facility/docker/vfs"],
+      HostConfig: { Mounts: [{ Type: "volume", Source: volume, Target: "/workspace" }] },
+    });
+    await seed.start();
+    await seed.wait();
+    await seed.remove();
+    const runtime = new DockerWorkspaceRuntime(docker);
+    const workspace = await runtime.create({ id, image });
+    try {
+      const driver = await runtime.exec(workspace, {
+        command: "docker",
+        args: ["info", "--format", "{{.Driver}}"],
+      });
+      expect(driver).toMatchObject({ exitCode: 0, stdout: "vfs\n" });
+    } finally {
+      await runtime.destroy(workspace);
+    }
+  }, 120_000);
   it("renews Git and gh credentials in an existing runner without replacing its volume", async () => {
     const runtime = new DockerWorkspaceRuntime(new Docker());
     const workspace = await runtime.create({
@@ -549,7 +580,7 @@ describe.skipIf(!enabled)("DockerWorkspaceRuntime integration", () => {
         command: "sh",
         args: ["-lc", "printf '%s|' \"$(id -un)\"; docker info --format '{{.Driver}}'"],
       });
-      expect(bootstrap).toMatchObject({ exitCode: 0, stdout: "node|vfs\n" });
+      expect(bootstrap).toMatchObject({ exitCode: 0, stdout: "node|overlay2\n" });
       const write = await runtime.exec(workspace, {
         command: "sh",
         args: [
