@@ -11,12 +11,15 @@ The story's **Run details** and turn-events API expose the same scoped timeline.
   Native session identifiers are checkpointed in the same transaction as their
   initialization event. A failed first turn can therefore resume its retained
   native session on the next requested turn.
-- Vercel workspaces emit `workspace.health` approximately every 30 seconds, also
-  during project setup. Each sample records provider state and VM identity,
-  available memory, cgroup memory usage/limit and OOM kills, load, disk space,
-  boot identity, uptime, Git HEAD, and the number of modified tracked files when
-  available. Missing counters mean unavailable, not zero. These are diagnostic
-  samples, not billing measurements or a backup of source files.
+- Vercel and Docker workspaces emit `workspace.health` approximately every 30
+  seconds, also during project setup. Each sample records provider state and
+  compute identity, available memory, cgroup memory usage/limit and OOM kills,
+  load, disk space, boot identity, uptime, Git HEAD, and the number of modified
+  tracked files when available. Missing counters mean unavailable, not zero.
+  These are diagnostic samples, not billing measurements or a backup of source
+  files. On Docker the memory limit and OOM counter are the workspace
+  container's own cgroup, and disk space is the filesystem that holds the
+  workspace volume, usually the host's disk rather than a per-workspace quota.
 - `workspace.ready` records the VM and retained volume used after initialization.
   The dispatcher initializes transient services again before preparing each turn,
   including turns that waited in the queue while a VM was replaced.
@@ -26,7 +29,8 @@ The story's **Run details** and turn-events API expose the same scoped timeline.
 - Failed setup, seed, and service-start commands retain their exit code and bounded,
   redacted output in the environment timeline before reporting failure.
 
-Health probes bind to the current Vercel session without resuming stopped compute.
+Health probes bind to the current Vercel session or Docker container without
+resuming stopped compute.
 They have an eight-second observation deadline and a five-second remote command
 limit, never overlap, and do not fail the agent when a probe is unavailable.
 They collect allowlisted counters and identifiers, not environment variables,
